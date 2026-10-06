@@ -7,6 +7,7 @@ import 'package:record/record.dart';
 import 'models/transcript.dart';
 import 'services/audio_stream_service.dart';
 import 'services/stt_service.dart';
+import 'services/storage_service.dart';
 
 void main() => runApp(const VoiceNoteApp());
 
@@ -40,6 +41,18 @@ class HomePage extends StatelessWidget {
           _modeCard(context,'课堂',Icons.menu_book_rounded,'老师讲课实时变成文字'),
           const SizedBox(height:12),
           _modeCard(context,'会议',Icons.groups_rounded,'会议讨论实时转录'),
+          const SizedBox(height:12),
+          Card(
+            elevation:0,
+            child:ListTile(
+              contentPadding:const EdgeInsets.symmetric(horizontal:16,vertical:8),
+              leading:const CircleAvatar(radius:27,backgroundColor:Color(0xFFEAF7EF),child:Icon(Icons.folder_rounded,color:Color(0xFF2E8B57))),
+              title:const Text('录音管理',style:TextStyle(fontWeight:FontWeight.bold,fontSize:18)),
+              subtitle:const Padding(padding:EdgeInsets.only(top:4),child:Text('查看、选择删除录音，清理垃圾文件')),
+              trailing:const Icon(Icons.arrow_forward_ios_rounded,size:16),
+              onTap:()=>Navigator.push(context,MaterialPageRoute(builder:(_)=>const RecordingManagerPage())),
+            ),
+          ),
           const SizedBox(height:24),
           Card(
             elevation:0,
@@ -175,6 +188,16 @@ class _LiveTranscriptionPageState extends State<LiveTranscriptionPage> {
     await stt.stop();
     final saved=await fileRecorder.stop();
     audioPath=saved??audioPath;
+    if(audioPath!=null && await File(audioPath!).exists()){
+      await StorageService().addRecording(SavedRecording(
+        id: DateTime.now().microsecondsSinceEpoch.toString(),
+        path: audioPath!,
+        title: '${widget.mode} ${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2,'0')}-${DateTime.now().day.toString().padLeft(2,'0')} ${DateTime.now().hour.toString().padLeft(2,'0')}:${DateTime.now().minute.toString().padLeft(2,'0')}',
+        mode: widget.mode,
+        createdAt: DateTime.now(),
+        durationSeconds: seconds,
+      ));
+    }
     if(mounted)setState(()=>running=false);
   }
 
@@ -285,4 +308,114 @@ class _LiveTranscriptionPageState extends State<LiveTranscriptionPage> {
   );
 
   String _fmt(int s)=>'${(s~/3600).toString().padLeft(2,'0')}:${((s%3600)~/60).toString().padLeft(2,'0')}:${(s%60).toString().padLeft(2,'0')}';
+}
+
+
+class RecordingManagerPage extends StatefulWidget {
+  const RecordingManagerPage({super.key});
+  @override State<RecordingManagerPage> createState()=>_RecordingManagerPageState();
+}
+
+class _RecordingManagerPageState extends State<RecordingManagerPage> {
+  final StorageService storage=StorageService();
+  List<SavedRecording> recordings=[];
+  Set<String> selected={};
+  bool loading=true;
+  StorageStats? stats;
+
+  @override void initState(){super.initState(); _load();}
+
+  Future<void> _load() async {
+    setState(()=>loading=true);
+    recordings=await storage.loadRecordings();
+    stats=await storage.stats();
+    if(mounted)setState(()=>loading=false);
+  }
+
+  Future<void> _cleanup() async {
+    final result=await storage.cleanupJunkFiles();
+    await _load();
+    if(!mounted)return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text(result.count==0?'没有发现可清理的垃圾文件':'已清理 ${result.count} 个垃圾文件，释放 ${formatBytes(result.bytes)}')));
+  }
+
+  Future<void> _deleteSelected() async {
+    final targets=recordings.where((r)=>selected.contains(r.id)).toList();
+    if(targets.isEmpty)return;
+    final ok=await showDialog<bool>(context:context,builder:(c)=>AlertDialog(
+      title:const Text('确认删除录音？'),
+      content:Text('将删除 ${targets.length} 个录音文件。删除后无法恢复。'),
+      actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('取消')),FilledButton(onPressed:()=>Navigator.pop(c,true),style:FilledButton.styleFrom(backgroundColor:Colors.red),child:const Text('删除'))],
+    ));
+    if(ok!=true)return;
+    await storage.deleteRecordings(targets);
+    selected.clear();
+    await _load();
+  }
+
+  @override Widget build(BuildContext context){
+    final allSelected=recordings.isNotEmpty && selected.length==recordings.length;
+    return Scaffold(
+      appBar:AppBar(
+        title:const Text('录音管理'),
+        actions:[
+          IconButton(tooltip:'清理垃圾文件',onPressed:_cleanup,icon:const Icon(Icons.cleaning_services_rounded)),
+          if(recordings.isNotEmpty)IconButton(tooltip:allSelected?'取消全选':'全选',onPressed:()=>setState(()=>selected=allSelected?{}:recordings.map((r)=>r.id).toSet()),icon:Icon(allSelected?Icons.deselect:Icons.select_all)),
+        ],
+      ),
+      body:RefreshIndicator(
+        onRefresh:_load,
+        child:loading
+          ? const Center(child:CircularProgressIndicator())
+          : ListView(
+              padding:const EdgeInsets.fromLTRB(16,8,16,28),
+              children:[
+                _storageCard(),
+                const SizedBox(height:14),
+                Row(children:[
+                  const Expanded(child:Text('已保存录音',style:TextStyle(fontSize:18,fontWeight:FontWeight.bold))),
+                  if(selected.isNotEmpty)FilledButton.icon(onPressed:_deleteSelected,style:FilledButton.styleFrom(backgroundColor:Colors.red),icon:const Icon(Icons.delete_outline),label:Text('删除 ${selected.length}')),
+                ]),
+                const SizedBox(height:8),
+                if(recordings.isEmpty)
+                  const Card(elevation:0,child:Padding(padding:EdgeInsets.all(28),child:Column(children:[Icon(Icons.audio_file_outlined,size:48,color:Colors.black26),SizedBox(height:10),Text('还没有保存的录音',style:TextStyle(color:Colors.black54)),SizedBox(height:4),Text('录音结束后会自动出现在这里',style:TextStyle(fontSize:12,color:Colors.black38))])))
+                else ...recordings.map(_recordingTile),
+              ],
+            ),
+      ),
+    );
+  }
+
+  Widget _storageCard()=>Card(
+    elevation:0,
+    child:Padding(padding:const EdgeInsets.all(18),child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+      Row(children:[const Icon(Icons.storage_rounded,color:Color(0xFF5B5FEF)),const SizedBox(width:9),const Text('存储空间',style:TextStyle(fontWeight:FontWeight.bold,fontSize:16)),const Spacer(),Text(formatBytes(stats?.recordingBytes??0),style:const TextStyle(fontWeight:FontWeight.bold))]),
+      const SizedBox(height:8),
+      Text('${stats?.recordingCount??0} 个录音占用空间 · 垃圾文件可单独清理',style:const TextStyle(color:Colors.black54,fontSize:13)),
+      const SizedBox(height:14),
+      OutlinedButton.icon(onPressed:_cleanup,icon:const Icon(Icons.cleaning_services_outlined),label:const Text('一键清理垃圾文件')),
+    ])),
+  );
+
+  Widget _recordingTile(SavedRecording r){
+    final checked=selected.contains(r.id);
+    return Card(
+      elevation:0,
+      margin:const EdgeInsets.only(bottom:8),
+      child:ListTile(
+        leading:Checkbox(value:checked,onChanged:(v)=>setState(()=>v==true?selected.add(r.id):selected.remove(r.id))),
+        title:Text(r.title,maxLines:1,overflow:TextOverflow.ellipsis),
+        subtitle:Text('${r.mode} · ${_date(r.createdAt)} · ${_duration(r.durationSeconds)}'),
+        trailing:IconButton(tooltip:'删除',icon:const Icon(Icons.delete_outline,color:Colors.redAccent),onPressed:()=>_deleteOne(r)),
+      ),
+    );
+  }
+
+  Future<void> _deleteOne(SavedRecording r) async {
+    final ok=await showDialog<bool>(context:context,builder:(c)=>AlertDialog(title:const Text('删除这条录音？'),content:Text('“${r.title}”将被永久删除。'),actions:[TextButton(onPressed:()=>Navigator.pop(c,false),child:const Text('取消')),FilledButton(onPressed:()=>Navigator.pop(c,true),style:FilledButton.styleFrom(backgroundColor:Colors.red),child:const Text('删除'))]));
+    if(ok==true){await storage.deleteRecording(r); selected.remove(r.id); await _load();}
+  }
+
+  String _date(DateTime d)=>'${d.year}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')} ${d.hour.toString().padLeft(2,'0')}:${d.minute.toString().padLeft(2,'0')}';
+  String _duration(int s)=>'${(s~/60).toString().padLeft(2,'0')}:${(s%60).toString().padLeft(2,'0')}';
 }
