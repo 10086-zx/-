@@ -1,0 +1,26 @@
+name: voice_note_v3
+description: 声记 V3 - 实时语音转文字课堂会议助手
+publish_to: "none"
+version: 3.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  record: ^5.1.2
+  path_provider: ^2.1.4
+  permission_handler: ^11.3.1
+  shared_preferences: ^2.3.2
+  http: ^1.2.2
+  web_socket_channel: ^3.0.1
+  uuid: ^4.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
