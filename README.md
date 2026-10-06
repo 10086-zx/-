@@ -1,68 +1,59 @@
-# 声记 V3：实时语音转文字
+# 声记 V3 — 实时语音转文字 + 存储管理（Android 完整工程）
 
-## 这一版的重点
-V3 不再把 AI 总结当核心，而是把核心体验放在：
-**手机麦克风 → PCM 音频流 → WebSocket → 后端 Speech-to-Text → partial/final 文字 → App 实时显示**
+这是 V3 的 Android 工程增强版，在原有 Flutter 实时录音/实时转写/录音清理功能基础上补齐了 `android/` 原生工程目录。
 
-同时保留一份本地 M4A 录音，防止转写服务中断导致音频丢失。
+## 已包含
 
-## 需要后端
-Flutter App 不应该直接携带第三方 STT API Key。
-需要一个很薄的 WebSocket 后端：
+- Flutter Android 工程结构
+- Android Gradle / Kotlin 配置
+- AndroidManifest.xml
+- Kotlin MainActivity
+- 麦克风权限
+- Internet 权限
+- Android 13+ 通知权限
+- Android 14+ 麦克风前台服务权限声明
+- Wake Lock 权限
+- 手机/平板自适应所需的 Flutter Activity 配置
+- Release 构建配置
+- 原有实时转写、录音保存、垃圾文件清理、选择删除录音功能
 
-客户端 -> `wss://你的域名/realtime-stt`
+## 第一次构建
 
-客户端发送：
-```json
-{"type":"audio","audio_base64":"...","sample_rate":16000}
+在安装了 Flutter SDK、Android SDK 和 JDK 17 的电脑上：
+
+```bash
+flutter pub get
+flutter doctor
+flutter run
 ```
 
-后端返回：
-```json
-{"type":"partial","text":"我们今天"}
-{"type":"final","text":"我们今天开始学习微积分。","speaker":"老师"}
+或者：
+
+```bash
+flutter build apk --release
 ```
 
-然后在 `lib/services/stt_service.dart`：
-```dart
-static const String backendUrl = 'wss://YOUR-DOMAIN.com/realtime-stt';
-```
-替换成自己的后端地址。
+Android SDK / Flutter SDK 路径由 `android/local.properties` 提供。可以参考 `android/local.properties.example`。
 
-## 后端应该做什么
-1. 接收 WebSocket PCM 16-bit mono 16kHz
-2. 将音频流转发到实际 Speech-to-Text 服务
-3. 将临时结果返回为 `partial`
-4. 将确定结果返回为 `final`
-5. 可选：返回 `speaker`
+## 注意：Gradle Wrapper
 
-第三方 STT 可以以后替换，不影响 App UI。
+当前打包环境没有 Flutter/Android SDK，也没有可复用的 `gradle-wrapper.jar`，且无法从网络下载。因此本压缩包包含 `gradlew`、`gradlew.bat` 和 `gradle-wrapper.properties`，但不伪造或内置缺失的二进制 `gradle-wrapper.jar`。
 
-## Android
-需要：
-`android.permission.RECORD_AUDIO`
+如果使用 Android Studio 打开项目，Android Studio 可以使用其 Gradle 支持完成同步；也可以在完整 Flutter 环境中重新生成 wrapper：
 
-## iOS
-Info.plist：
-```xml
-<key>NSMicrophoneUsageDescription</key>
-<string>声记需要使用麦克风录制课堂和会议内容。</string>
+```bash
+cd android
+gradle wrapper --gradle-version 8.9
 ```
 
-## 重要说明
-这个压缩包已经把“实时转写客户端”完整搭起来，但没有伪造一个不存在的云端识别服务。
-如果不配置 WebSocket 后端，App 仍可录音，但会提示“实时转写服务尚未配置”。
+如果电脑已经安装 Flutter，最简单的方法是直接执行：
 
+```bash
+flutter create .
+```
 
-## V3 存储管理升级
+Flutter 会补齐标准 Android 工程缺失的 wrapper 文件；然后保留本项目的 `lib/`、`pubspec.yaml` 和 Android 配置即可。
 
-新增“录音管理”页面：
-- 查看已保存录音及占用空间
-- 勾选多条录音后批量删除
-- 单条录音删除
-- 一键清理应用产生的临时垃圾文件（`.tmp`、`.partial`、`.part`、`temp_`、`stt_`、`pcm_`），不会主动删除已登记的正式录音
-- 自动清理失效的录音索引
-- 自动扫描早期 V3 已产生的 `voice_*.m4a`，纳入可删除列表
-- 显示录音数量和总占用空间
+## 实时转写后端
 
-注意：本版本仍需要 Flutter/Android SDK 才能编译成 APK；实时转写仍需要配置 V3 的 WebSocket STT 后端。
+V3 的实时转写客户端仍然通过 `lib/services/stt_service.dart` 连接 WebSocket STT 后端。不要把第三方 API Secret 直接写入 APK。
