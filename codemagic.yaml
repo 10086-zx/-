@@ -1,0 +1,31 @@
+workflows:
+  android-apk:
+    name: 声记 Android APK
+
+    max_build_duration: 60
+
+    environment:
+      flutter: stable
+
+    scripts:
+      - name: 检查 Flutter 环境
+        script: |
+          flutter --version
+          dart --version
+
+      - name: 获取 Flutter 依赖
+        script: |
+          flutter pub get
+
+      - name: 检查 Android 工程
+        script: |
+          test -f android/app/build.gradle || test -f android/app/build.gradle.kts
+          test -f android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: 构建 Android APK
+        script: |
+          flutter build apk --release
+
+    artifacts:
+      - build/app/outputs/flutter-apk/*.apk
+      - build/**/outputs/**/*.apk
